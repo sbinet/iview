@@ -4,8 +4,15 @@ iview
 A minimalistic image viewer written in Go.
 
 The list of image formats supported is currently at the mercy of whatever is 
-supported by the Go standard library. Currently, those formats are png, jpg and 
-gif.
+supported by the Go standard library.
+
+Currently, those formats are:
+
+- `image/gif`
+- `image/jpeg`
+- `image/png`
+- `golang.org/x/image/bmp`
+- `golang.org/x/image/tiff`
 
 Please see `iview -help` for more options.
 

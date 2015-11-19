@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/exp/shiny/driver"
 	"golang.org/x/exp/shiny/screen"
+	_ "golang.org/x/image/bmp"
 	_ "golang.org/x/image/tiff"
 	"golang.org/x/mobile/event/key"
 	"golang.org/x/mobile/event/mouse"
