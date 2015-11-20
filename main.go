@@ -42,6 +42,9 @@ var (
 
 	// Whether to run a CPU profile.
 	flagProfile string
+
+	// background color
+	bkgCol = color.Black
 )
 
 func init() {
@@ -95,10 +98,10 @@ func main() {
 		usage()
 	}
 
-	driver.Main(func(s screen.Screen) {
-		// Decode all images (in parallel).
-		names, imgs := decodeImages(findFiles(flag.Args()))
+	// Decode all images (in parallel).
+	names, imgs := decodeImages(findFiles(flag.Args()))
 
+	driver.Main(func(s screen.Screen) {
 		// Die now if we don't have any images!
 		if len(imgs) == 0 {
 			log.Fatal("No images specified could be shown. Quitting...")
@@ -107,41 +110,50 @@ func main() {
 		winSize := image.Point{flagWidth, flagHeight}
 		// Auto-size the window if appropriate.
 		if flagAutoResize {
-			log.Printf(">>> img[%s]...\n", names[0])
 			b := imgs[0].Bounds()
+			log.Printf("auto-resize from [%s]...\n", names[0])
 			winSize = image.Point{b.Dx(), b.Dy()}
 		}
 
-		w, err := s.NewWindow(&screen.NewWindowOptions{
-			Width:  winSize.X,
-			Height: winSize.Y,
-		})
+		w, err := newWindow(s, winSize)
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer w.Release()
 
-		b, err := s.NewBuffer(winSize)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer b.Release()
-
-		w.Fill(b.Bounds(), color.White, draw.Src)
-		w.Publish()
-
-		var sz size.Event
 		var i int // index of image to display
-		for e := range w.Events() {
-			switch e := e.(type) {
+
+		w.w.Fill(w.b.Bounds(), bkgCol, draw.Src)
+		w.display(imgs[i])
+
+		for {
+			switch e := w.next().(type) {
 			default:
 				fmt.Printf("got %#v\n", e)
 
 			case mouse.Event:
-				fmt.Printf("got-mouse: %v\n", e)
+				switch e.Direction {
+				case mouse.DirPress:
+					if e.Button == mouse.ButtonLeft {
+						w.pan = true
+						w.mouse = image.Point{int(e.X), int(e.Y)}
+					}
+				case mouse.DirRelease:
+					if e.Button == mouse.ButtonLeft {
+						w.pan = false
+						w.mouse = image.Point{}
+					}
+				case mouse.DirNone:
+					if w.pan {
+						pos := image.Point{int(e.X), int(e.Y)}
+						w.orig.X += pos.X - w.mouse.X
+						w.orig.Y += pos.Y - w.mouse.Y
+						w.mouse = pos
+						w.w.Send(paint.Event{})
+					}
+				}
 
 			case key.Event:
-				fmt.Printf("got-key-evt %v\n", e)
 				repaint := false
 				switch e.Code {
 				case key.CodeEscape, key.CodeQ:
@@ -153,11 +165,7 @@ func main() {
 						}
 						i++
 						repaint = true
-						b.Release()
-						b, err = s.NewBuffer(sz.Size())
-						if err != nil {
-							log.Fatal(err)
-						}
+						w.orig = image.Point{}
 					}
 
 				case key.CodeLeftArrow:
@@ -167,53 +175,123 @@ func main() {
 						}
 						i--
 						repaint = true
-						b, err = s.NewBuffer(sz.Size())
-						if err != nil {
-							log.Fatal(err)
-						}
+						w.orig = image.Point{}
 					}
 
 				case key.CodeR:
 					if e.Direction == key.DirPress {
+						repaint = true
+					}
+
+				case key.CodeZ:
+					if e.Direction == key.DirPress {
 						// resize to current image
 						r := imgs[i].Bounds()
-						sz.HeightPx = r.Dy()
-						sz.WidthPx = r.Dx()
-						repaint = true
-						b, err = s.NewBuffer(sz.Size())
-						if err != nil {
-							log.Fatal(err)
-						}
-						w.Publish()
-
+						w.orig = image.Point{}
+						w.w.Resize(r.Max)
 					}
 				}
 				if repaint {
-					w.Send(paint.Event{})
+					w.w.Send(paint.Event{})
 				}
 
 			case paint.Event:
-				fmt.Printf("got %#v\n", e)
-				img := imgs[i]
-				fmt.Printf("-> %v | %v (idx=%d)\n", img.Bounds(), b.Bounds(), i)
-				draw.Draw(b.RGBA(), b.Bounds(), img, image.Point{}, draw.Src)
-				dp := vpCenter(img, sz.WidthPx, sz.HeightPx)
-				zero := image.Point{}
-				if dp != zero {
-					w.Fill(sz.Bounds(), color.Black, draw.Src)
+				if e.External {
+					continue
 				}
-				w.Upload(dp, b, b.Bounds(), w)
-				fmt.Printf("<- %#v\n", w.Publish())
+				w.display(imgs[i])
 
 			case size.Event:
-				fmt.Printf("resize-event: %v -> %v\n", sz, e)
-				sz = e
+				err = w.newBuffer()
+				if err != nil {
+					log.Fatal(err)
+				}
+				w.display(imgs[i])
+
+			case screen.UploadedEvent:
+				// no-op
 
 			case error:
 				log.Print(e)
 			}
 		}
 	})
+}
+
+type window struct {
+	s    screen.Screen
+	w    screen.Window
+	b    screen.Buffer
+	orig image.Point
+
+	pan   bool
+	mouse image.Point
+}
+
+func newWindow(s screen.Screen, size image.Point) (*window, error) {
+	w, err := s.NewWindow(
+		&screen.NewWindowOptions{
+			Width:  size.X,
+			Height: size.Y,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	buf, err := s.NewBuffer(size)
+	if err != nil {
+		return nil, err
+	}
+
+	return &window{
+		s: s,
+		w: w,
+		b: buf,
+	}, nil
+}
+
+func (w *window) Release() {
+	w.b.Release()
+	w.w.Release()
+	w.s = nil
+}
+
+func (w *window) next() interface{} {
+	return w.w.NextEvent()
+}
+
+func (w *window) resize(size image.Point) error {
+	w.w.Resize(size)
+	return w.newBuffer()
+}
+
+func (w *window) display(img image.Image) screen.PublishResult {
+	sz := w.w.Size()
+	rect := image.Rect(0, 0, sz.X, sz.Y)
+	dp := vpCenter(img, sz.X, sz.Y)
+	sr := img.Bounds()
+
+	w.w.Fill(rect, bkgCol, draw.Src)
+	draw.Draw(w.b.RGBA(), w.b.Bounds(), img, image.Point{}, draw.Src)
+	if !sr.In(rect) {
+		sr = rect
+	}
+	w.w.Upload(dp.Add(w.orig), w.b, sr, w.w)
+
+	o := w.w.Publish()
+	return o
+}
+
+func (w *window) newBuffer() error {
+	return w.newBufferSize(w.w.Size())
+}
+
+func (w *window) newBufferSize(size image.Point) error {
+	var err error
+	w.b.Release()
+	w.b, err = w.s.NewBuffer(size)
+	return err
 }
 
 func findFiles(args []string) []string {
