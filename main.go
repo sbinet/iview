@@ -132,16 +132,14 @@ func main() {
 
 		var sz size.Event
 		var i int // index of image to display
-		for e := range w.Events() {
+		for {
+			e := w.NextEvent()
 			switch e := e.(type) {
 			default:
-				fmt.Printf("got %#v\n", e)
 
 			case mouse.Event:
-				fmt.Printf("got-mouse: %v\n", e)
 
 			case key.Event:
-				fmt.Printf("got-key-evt %v\n", e)
 				repaint := false
 				switch e.Code {
 				case key.CodeEscape, key.CodeQ:
@@ -193,20 +191,16 @@ func main() {
 				}
 
 			case paint.Event:
-				fmt.Printf("got %#v\n", e)
 				img := imgs[i]
-				fmt.Printf("-> %v | %v (idx=%d)\n", img.Bounds(), b.Bounds(), i)
 				draw.Draw(b.RGBA(), b.Bounds(), img, image.Point{}, draw.Src)
 				dp := vpCenter(img, sz.WidthPx, sz.HeightPx)
 				zero := image.Point{}
 				if dp != zero {
 					w.Fill(sz.Bounds(), color.Black, draw.Src)
 				}
-				w.Upload(dp, b, b.Bounds(), w)
-				fmt.Printf("<- %#v\n", w.Publish())
+				w.Upload(dp, b, b.Bounds())
 
 			case size.Event:
-				fmt.Printf("resize-event: %v -> %v\n", sz, e)
 				sz = e
 
 			case error:
