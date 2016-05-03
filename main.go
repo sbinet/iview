@@ -49,7 +49,7 @@ var (
 
 func init() {
 	// Set the prefix for verbose output.
-	log.SetPrefix("[imgv] ")
+	log.SetPrefix("[iview] ")
 
 	// Set all of the flags.
 	flag.BoolVar(&flagVerbose, "v", false,
